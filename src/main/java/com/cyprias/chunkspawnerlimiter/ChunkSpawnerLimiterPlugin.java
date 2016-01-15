@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map.Entry;
 
 import org.bukkit.ChatColor;
@@ -15,6 +16,7 @@ import org.bukkit.entity.Ambient;
 import org.bukkit.entity.Animals;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.HumanEntity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Monster;
 import org.bukkit.entity.NPC;
 import org.bukkit.entity.Player;
@@ -27,6 +29,8 @@ import com.cyprias.chunkspawnerlimiter.listeners.EntityListener;
 import com.cyprias.chunkspawnerlimiter.listeners.WorldListener;
 
 public class ChunkSpawnerLimiterPlugin extends JavaPlugin {
+
+	private List<String> ignoreMetadata, excludedWorlds;
 
 	@Override
 	public void onEnable() {
@@ -63,6 +67,9 @@ public class ChunkSpawnerLimiterPlugin extends JavaPlugin {
 			} catch (IOException e) {}
 		}
 
+		ignoreMetadata = getConfig().getStringList("properties.ignore-metadata");
+		excludedWorlds = getConfig().getStringList("excluded-worlds");
+
 	}
 
 	@Override
@@ -94,30 +101,56 @@ public class ChunkSpawnerLimiterPlugin extends JavaPlugin {
 
 	public boolean checkChunk(Chunk chunk, Entity entity) {
 		// Stop processing quickly if this world is excluded from limits.
-		if (getConfig().getStringList("excluded-worlds").contains(chunk.getWorld().getName())) {
+		if (excludedWorlds.contains(chunk.getWorld().getName())) {
 			return false;
+		}
+
+		if (entity != null) {
+			// Quick return conditions for cancelling new spawns
+			if (entity instanceof HumanEntity) {
+				return false;
+			}
+
+			for (String metadata : ignoreMetadata) {
+				if (entity.hasMetadata(metadata)) {
+					return false;
+				}
+			}
 		}
 
 		Entity[] entities = chunk.getEntities();
 		HashMap<String, ArrayList<Entity>> types = new HashMap<String, ArrayList<Entity>>();
 
-		for (int i = entities.length - 1; i >= 0; i--) {
+		nextChunkEntity: for (int i = entities.length - 1; i >= 0; i--) {
+			Entity chunkEntity = entities[i];
+			// Don't include HumanEntities in our summed list at all.
+			// They're either Players or plugin-added and we probably shouldn't touch them.
+			if (chunkEntity instanceof HumanEntity) {
+				continue;
+			}
 
-			String eType = entities[i].getType().name();
-			String eGroup = getMobGroup(entities[i]);
+			// Ignore any Entity with listed metadata.
+			for (String metadata : ignoreMetadata) {
+				if (chunkEntity.hasMetadata(metadata)) {
+					continue nextChunkEntity;
+				}
+			}
+
+			String eType = chunkEntity.getType().name();
+			String eGroup = getMobGroup(chunkEntity);
 
 			if (getConfig().contains("entities." + eType)) {
 				if (!types.containsKey(eType)) {
 					types.put(eType, new ArrayList<Entity>());
 				}
-				types.get(eType).add(entities[i]);
+				types.get(eType).add(chunkEntity);
 			}
 
 			if (getConfig().contains("entities." + eGroup)) {
 				if (!types.containsKey(eGroup)) {
 					types.put(eGroup, new ArrayList<Entity>());
 				}
-				types.get(eGroup).add(entities[i]);
+				types.get(eGroup).add(chunkEntity);
 			}
 		}
 
@@ -169,8 +202,7 @@ public class ChunkSpawnerLimiterPlugin extends JavaPlugin {
 						entry.getValue().size() - limit, eType);
 				for (int i = entities.length - 1; i >= 0; i--) {
 					if (entities[i] instanceof Player) {
-						Player p = (Player) entities[i];
-						p.sendMessage(notification);
+						((Player) entities[i]).sendMessage(notification);
 					}
 				}
 			}
@@ -180,7 +212,9 @@ public class ChunkSpawnerLimiterPlugin extends JavaPlugin {
 			int index = entry.getValue().size() - 1;
 			while (toRemove > 0 && index >= 0) {
 				Entity toCheck = entry.getValue().get(index);
-				if (!skipNamed || toCheck.getCustomName() == null) {
+				if (!skipNamed || toCheck.getCustomName() == null
+						|| toCheck instanceof LivingEntity
+						&& ((LivingEntity) toCheck).getRemoveWhenFarAway()) {
 					toCheck.remove();
 					--toRemove;
 				}
@@ -191,10 +225,6 @@ public class ChunkSpawnerLimiterPlugin extends JavaPlugin {
 			}
 			index = entry.getValue().size() - toRemove - 1;
 			for (; index < entry.getValue().size(); index++) {
-				// don't remove players
-				if (entry.getValue().get(index) instanceof HumanEntity) {
-					continue;
-				}
 				entry.getValue().get(index).remove();
 			}
 		}

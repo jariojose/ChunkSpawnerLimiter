@@ -33,6 +33,10 @@ properties:
   # Prioritize entities without names over older entities.
   preserve-named-entities: true
 
+  # Ignore entities with any of the following metadata.
+  ignore-metadata:
+  - shopkeeper
+
 # Spawn reasons to cull on.
 spawn-reasons:
   NATURAL: true
