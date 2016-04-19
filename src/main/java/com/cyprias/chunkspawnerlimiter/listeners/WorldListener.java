@@ -49,9 +49,8 @@ public class WorldListener implements Listener {
 					plugin.getConfig().getInt("properties.inspection-frequency") * 20L);
 
 			chunkTasks.put(event.getChunk(), task);
-		}
-
-		if (plugin.getConfig().getBoolean("properties.check-chunk-load")) {
+		} else if (plugin.getConfig().getBoolean("properties.check-chunk-load")) {
+			// Active inspection will check immediately as well, no need to check twice
 			plugin.checkChunk(event.getChunk(), null);
 		}
 	}
@@ -67,6 +66,13 @@ public class WorldListener implements Listener {
 		if (plugin.getConfig().getBoolean("properties.check-chunk-unload")) {
 			plugin.checkChunk(event.getChunk(), null);
 		}
+	}
+
+	public void cancelAllTasks() {
+		for (BukkitTask task : chunkTasks.values()) {
+			task.cancel();
+		}
+		chunkTasks.clear();
 	}
 
 }

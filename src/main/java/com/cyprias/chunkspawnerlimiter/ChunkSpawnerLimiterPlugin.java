@@ -11,6 +11,8 @@ import java.util.Map.Entry;
 
 import org.bukkit.ChatColor;
 import org.bukkit.Chunk;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Ambient;
 import org.bukkit.entity.Animals;
@@ -21,6 +23,7 @@ import org.bukkit.entity.Monster;
 import org.bukkit.entity.NPC;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.WaterMob;
+import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import org.mcstats.Metrics;
@@ -31,6 +34,9 @@ import com.cyprias.chunkspawnerlimiter.listeners.WorldListener;
 public class ChunkSpawnerLimiterPlugin extends JavaPlugin {
 
 	private List<String> ignoreMetadata, excludedWorlds;
+	private EntityListener entityListener;
+	private WorldListener worldListener;
+	private Metrics metrics;
 
 	@Override
 	public void onEnable() {
@@ -41,30 +47,51 @@ public class ChunkSpawnerLimiterPlugin extends JavaPlugin {
 		// Warn console if config is missing properties.
 		checkForMissingProperties();
 
-		// Register our event listener.
+		// Register our event listeners.
 		if (getConfig().getBoolean("properties.watch-creature-spawns")) {
-			getServer().getPluginManager().registerEvents(new EntityListener(this), this);
+			// Only register events once in the event of a config reload.
+			if (entityListener == null) {
+				entityListener = new EntityListener(this);
+				getServer().getPluginManager().registerEvents(entityListener, this);
+			}
+		} else if (entityListener != null) {
+			// Disable listeners that are not enabled when configuration is reloaded.
+			HandlerList.unregisterAll(entityListener);
+			entityListener = null;
 		}
 		if (getConfig().getBoolean("properties.active-inspections")
-				|| getConfig().getBoolean("properties.check-chunk-load")) {
-			getServer().getPluginManager().registerEvents(new WorldListener(this), this);
+				|| getConfig().getBoolean("properties.check-chunk-load")
+				|| getConfig().getBoolean("properties.check-chunk-unload")) {
+			if (worldListener == null) {
+				worldListener = new WorldListener(this);
+				getServer().getPluginManager().registerEvents(worldListener, this);
+			}
+		} else if (worldListener != null) {
+			HandlerList.unregisterAll(worldListener);
+			worldListener.cancelAllTasks();
+			worldListener = null;
 		}
 
-		// Disable if no listeners are enabled.
-		if (!getConfig().getBoolean("properties.watch-creature-spawns")
-				&& !getConfig().getBoolean("properties.active-inspections")
-				&& !getConfig().getBoolean("properties.check-chunk-load")) {
+		// Warn if no listeners are enabled.
+		if (entityListener == null && worldListener == null) {
 			getLogger().severe("No listeners are enabled, the plugin will do nothing!");
 			getLogger().severe("Enable creature spawn monitoring, active inspections, or chunk load inspections.");
-			getServer().getPluginManager().disablePlugin(this);
+			getLogger().severe("Edit your configuration and then run '/csl reload'");
 		}
 
 		// Start the Metrics.
 		if (getConfig().getBoolean("properties.use-metrics")) {
-			try {
-				Metrics metrics = new Metrics(this);
-				metrics.start();
-			} catch (IOException e) {}
+			if (metrics == null) {
+				try {
+					metrics = new Metrics(this);
+					metrics.start();
+				} catch (IOException e) {}
+			}
+		} else if (metrics != null) {
+			// Our own metrics stop method to disable without disabling for all plugins or cancelling our chunk checks.
+			// For future metrics revision updates, it's basically just the opt-out check from inside the task.
+			metrics.stop();
+			metrics = null;
 		}
 
 		ignoreMetadata = getConfig().getStringList("properties.ignore-metadata");
@@ -75,6 +102,16 @@ public class ChunkSpawnerLimiterPlugin extends JavaPlugin {
 	@Override
 	public void onDisable() {
 		getServer().getScheduler().cancelTasks(this);
+	}
+
+	@Override
+	public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+		if (args.length > 0 && args[0].equalsIgnoreCase("reload")) {
+			this.reloadConfig();
+			this.onEnable();
+			return true;
+		}
+		return false;
 	}
 
 	private void checkForMissingProperties() {

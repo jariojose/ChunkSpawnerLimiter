@@ -207,7 +207,7 @@ public class Metrics {
                 private boolean firstPost = true;
 
                 @Override
-				public void run() {
+                public void run() {
                     try {
                         // This has to be synchronized or it can collide with the disable method.
                         synchronized (optOutLock) {
@@ -239,6 +239,23 @@ public class Metrics {
             }, 0, PING_INTERVAL * 1200);
 
             return true;
+        }
+    }
+
+    /**
+     * Stop metrics without disabling it for all plugins.
+     */
+    public void stop() {
+        synchronized (optOutLock) {
+            // Disable Task, if it is running and the server owner decided to opt-out
+            if (task != null) {
+                task.cancel();
+                task = null;
+                // Tell all plotters to stop gathering information.
+                for (Graph graph : graphs) {
+                    graph.onOptOut();
+                }
+            }
         }
     }
 
